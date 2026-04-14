@@ -1,1 +1,2 @@
-# SAMD21-Clock-Setup-Bare-Metal-FT
+# SamD21_Clock_Setup
+Example code that shows how to setup and change the system clock on SAMD21 microcontroller family, uses direct register control in C++. Does not use ASF

@@ -12,9 +12,18 @@
 //these are 3 main subsystems of the SAMD21 that are used for clock control. 
 //They are defined in the sam.h header file and their registers are defined in 
 //the device datasheet
+//Clock System, Section 14, page 106
 //GCLK – Generic Clock Controller, Section 15, page 114
-//PM – Power Manager, section 16, page 133
+	//GCLK Generator 0-8 are the main clock generators that can be used to feed the system clock and other peripherals.
+	//GCLK Multiplexer 
+	//GCLK Multiplexer 0-31 AI says there are 31 of these.  It seems like there one for each peripheral, but I have not confirmed this.
+
+	//PM – Power Manager, section 16, page 133
 //SYSCTRL – System Controller, Section 17, page 162 
+// there are 20 registers in the SYSCTRL subsystem that I counted.
+
+//Can have 1 clock class, with an array of 9 clock generator objects. Each clock 
+//generator object has functions to set up the clock generator and change the source.
 
 //class constructor. Used to create object to handle to class in main
 Clock_Control::Clock_Control() { }

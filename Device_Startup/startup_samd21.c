@@ -27,7 +27,9 @@
  *
  */
 
-#include "samd21.h"
+//#include "samd21.h"
+//EJM changed to 
+#include "sam.h"
 
 /* Initialize segments */
 extern uint32_t _sfixed;
@@ -223,7 +225,8 @@ void Reset_Handler(void)
         SCB->VTOR = ((uint32_t) pSrc & SCB_VTOR_TBLOFF_Msk);
 
         /* Change default QOS values to have the best performance and correct USB behaviour */
-        SBMATRIX->SFR[SBMATRIX_SLAVE_HMCRAMC0].reg = 2;
+        //ejm was SBMATRIX->SFR[SBMATRIX_SLAVE_HMCRAMC0].reg = 2;
+        ID_SBMATRIX->SFR[SBMATRIX_SLAVE_HMCRAMC0].reg = 2;
 #if defined(ID_USB)
         USB->DEVICE.QOSCTRL.bit.CQOS = 2;
         USB->DEVICE.QOSCTRL.bit.DQOS = 2;
@@ -233,7 +236,7 @@ void Reset_Handler(void)
         DMAC->QOSCTRL.bit.WRBQOS = 2;
 
         /* Overwriting the default value of the NVMCTRL.CTRLB.MANW bit (errata reference 13134) */
-        NVMCTRL->CTRLB.bit.MANW = 1;
+        ID_NVMCTRL->CTRLB.bit.MANW = 1;
 
         /* Initialize the C library */
         __libc_init_array();

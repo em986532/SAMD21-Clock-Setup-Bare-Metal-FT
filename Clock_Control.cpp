@@ -277,6 +277,10 @@ void Clock_Control::Clock_Init(void)
 
     PORT_REGS->GROUP[1].PORT_DIRSET = (1U << 10);
 
+    PORT_REGS->GROUP[1].PORT_PINCFG[10] |= PORT_PINCFG_PMUXEN_Msk;
+    PORT_REGS->GROUP[1].PORT_PMUX[5] = (PORT_REGS->GROUP[1].PORT_PMUX[5] & 0x0FU) | (0x7U << 4); // Set PB10 to peripheral H (GCLK_IO[1])
+    
+
     //PORT_Initialize();
     //PORT_GroupOutputEnable(PORT_GROUP_B, PORT_PIN_PB10); // Set all pins of PORT_B as output for testing
     // Disable analog function if applicable

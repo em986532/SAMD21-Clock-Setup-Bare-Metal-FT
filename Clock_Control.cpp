@@ -8,6 +8,7 @@
 #include "samd21j18a.h"
 #include "Clock_Control.h"
 #include "Definitions.h"
+#include "plib_port.h"
 
 #define LED_PB30_MASK (1UL << 30)
 
@@ -122,9 +123,18 @@ void Clock_Control::Clock_Init(void)
     while (!(SYSCTRL_REGS->SYSCTRL_PCLKSR & SYSCTRL_PCLKSR_DFLLRDY_Msk))
     {
     }
-    
+
     // Enable DFLL in open loop first
     SYSCTRL_REGS->SYSCTRL_DFLLCTRL = SYSCTRL_DFLLCTRL_ENABLE(1);
+
+    while (!(SYSCTRL_REGS->SYSCTRL_PCLKSR & SYSCTRL_PCLKSR_DFLLRDY_Msk))
+    {
+    }
+
+    // Set default coarse and fine tuning values
+    SYSCTRL_REGS->SYSCTRL_DFLLVAL =
+        SYSCTRL_DFLLVAL_COARSE(0x1F) |
+        SYSCTRL_DFLLVAL_FINE(512);
 
     while (!(SYSCTRL_REGS->SYSCTRL_PCLKSR & SYSCTRL_PCLKSR_DFLLRDY_Msk))
     {
@@ -150,6 +160,23 @@ void Clock_Control::Clock_Init(void)
     }
 
     /************************************************************************/
+    /* WAIT FOR DFLL LOCK                                                   */
+    /************************************************************************/
+
+    // *** ADDED *** Wait for coarse lock
+    while (!(SYSCTRL_REGS->SYSCTRL_PCLKSR &
+            SYSCTRL_PCLKSR_DFLLLCKC_Msk))
+    {
+    }
+
+    // *** ADDED *** Wait for fine lock
+    //this line causes the code after it to not run, so it is commented out for now. It may be that the lock flags are not being set correctly in the SAMD21, or that the DFLL is not locking properly due to some configuration issue. Further investigation would be needed to determine the root cause.
+//    while (!(SYSCTRL_REGS->SYSCTRL_PCLKSR &
+//            SYSCTRL_PCLKSR_DFLLLCKF_Msk))
+//    {
+//    }
+
+    /************************************************************************/
     /* SWITCH MAIN CLOCK TO DFLL48M                                         */
     /************************************************************************/
 
@@ -157,18 +184,15 @@ void Clock_Control::Clock_Init(void)
         GCLK_GENCTRL_ID(0) |
         GCLK_GENCTRL_SRC_DFLL48M |
         GCLK_GENCTRL_IDC(1) |
-        GCLK_GENCTRL_GENEN(1);
+        GCLK_GENCTRL_GENEN(1)|
+        GCLK_GENCTRL_RUNSTDBY(1);
 
     while (GCLK_REGS->GCLK_STATUS & GCLK_STATUS_SYNCBUSY_Msk)
     {
     }
     
     /************************************************************************/
-    /* GENERIC CLOCK GENERATOR 4  —  DFLL48M / 48  =  1 MHz               */
-    /*                                                                      */
-    /* Source  : DFLL48M  (48 000 000 Hz)                                  */
-    /* Divider : 48                                                         */
-    /* Output  : 1 000 000 Hz  (1 MHz)                                     */
+    /* GENERIC CLOCK GENERATOR 4  —  DFLL48M / 48  =  1 MHz                 */
     /************************************************************************/
 
     // Set divider for GCLK4 to 48
@@ -182,11 +206,13 @@ void Clock_Control::Clock_Init(void)
 
     // Configure GCLK4: source = DFLL48M, divide enable, generator enable
     GCLK_REGS->GCLK_GENCTRL =
-        GCLK_GENCTRL_ID(4)          |   // Select generator 4
-        GCLK_GENCTRL_SRC_DFLL48M   |   // Source = DFLL48M (48 MHz)
-        GCLK_GENCTRL_IDC(1)         |   // Improve duty cycle for odd divisors
-        GCLK_GENCTRL_DIVSEL(0)      |   // Linear division mode (output = src / DIV)
-        GCLK_GENCTRL_GENEN(1);          // Enable generator
+        GCLK_GENCTRL_ID(4)          |
+        GCLK_GENCTRL_SRC_DFLL48M    |
+        GCLK_GENCTRL_IDC(1)         |
+        GCLK_GENCTRL_DIVSEL(0)      |
+        GCLK_GENCTRL_OE(1)          |   // *** CHANGED *** Enable clock output to GCLK_IO pin
+        GCLK_GENCTRL_GENEN(1)|
+        GCLK_GENCTRL_RUNSTDBY(1);
 
     while (GCLK_REGS->GCLK_STATUS & GCLK_STATUS_SYNCBUSY_Msk)
     {
@@ -197,15 +223,15 @@ void Clock_Control::Clock_Init(void)
     /*                                                                      */
     /* Outputs GCLK4 (1 MHz) to PA27 for oscilloscope debugging            */
     /************************************************************************/
-    /*
+    /**/ 
     // Configure PA27 as GCLK_IO[1] - set peripheral multiplexer to H
     PORT_REGS->GROUP[0].PORT_PMUX[13] =
-        (PORT_REGS->GROUP[0].PORT_PMUX[13] & 0x0FU) |  // Clear upper nibble (PA27 = pin 27, bit 3:0 for odd pin)
-        PORT_PMUX_H;                                    // Set to peripheral H (GCLK_IO[1])
+        (PORT_REGS->GROUP[0].PORT_PMUX[13] & 0x0FU) |  // Clear upper nibble (PA27 = pin 27, uses bits 7:4)
+        (0x7U << 4);                                    // Set to peripheral H (GCLK_IO[1]) in upper nibble (H=7)
 
     // Enable peripheral multiplexing on PA27
     PORT_REGS->GROUP[0].PORT_PINCFG[27] |= PORT_PINCFG_PMUXEN_Msk;
-    */
+    /**/
 
     /************************************************************************/
     /* INTERNAL 8MHz OSCILLATOR                                             */
@@ -239,6 +265,26 @@ void Clock_Control::Clock_Init(void)
     The exact 48 MHz multiplier would be:
     48,000,000/32768=1464.84375
     */
+
+    //GCLK_IO[0] PB22,PA27,PA28,PA30,PA14,PA27,PA28,PA30
+    //GCLK_IO[1] PA15,PB15,PB23,PB23
+    //GCLK_IO[2] PB10,
+    //GCLK_IO[3] PB10
+    //GCLK_IO[4] PA20,PA10,PB10,PA20
+    //GCLK_IO[5] PB10
+    //GCLK_IO[6] PB10
+    //GCLK_IO[7] PB10
+
+    PORT_REGS->GROUP[1].PORT_DIRSET = (1U << 10);
+
+    //PORT_Initialize();
+    //PORT_GroupOutputEnable(PORT_GROUP_B, PORT_PIN_PB10); // Set all pins of PORT_B as output for testing
+    // Disable analog function if applicable
+    //ANSELAbits.ANSA0 = 0;
+
+
+    // Configure RA0 as output
+    //TRISAbits.TRISA0 = 0;
 }
 
 /************************************************************************/
@@ -263,7 +309,8 @@ void Clock_Control::Change_Clock(uint32_t clk)
         GCLK_GENCTRL_ID(0) |
         GCLK_GENCTRL_SRC(clk) |
         GCLK_GENCTRL_IDC(1) |
-        GCLK_GENCTRL_GENEN(1);
+        GCLK_GENCTRL_GENEN(1)|
+        GCLK_GENCTRL_RUNSTDBY(1);
 
     while (GCLK_REGS->GCLK_STATUS & GCLK_STATUS_SYNCBUSY_Msk)
     {

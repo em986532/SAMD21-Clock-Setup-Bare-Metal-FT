@@ -77,6 +77,7 @@ void Clock_Control::Clock_Init(void) {
 	GCLK->GENCTRL.bit.GENEN = 1;	// Enable the generator
 	GCLK->GENCTRL.bit.SRC = CLOCK_XOSC32K;	// Generator source: XOSC32K output
 	GCLK->GENCTRL.bit.ID = GENERIC_CLOCK_GENERATOR_1;	// This was created in Definitions.h, refers to generic clock 1
+	GCLK->GENCTRL.bit.runstby = 1;		// Generic Clock Generator is stopped in stdby
 	// GENCTRL is Write-Synchronized...so wait for write to complete
 	while(GCLK->STATUS.bit.SYNCBUSY);
 	

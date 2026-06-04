@@ -192,6 +192,24 @@ void Clock_Control::Clock_Init(void)
     }
     
     /************************************************************************/
+    /* INTERNAL 8MHz OSCILLATOR                                             */
+    /************************************************************************/
+    // Configure OSC8M and preserve the existing calibration value
+    {
+        uint32_t osc8m_calib = SYSCTRL_REGS->SYSCTRL_OSC8M & SYSCTRL_OSC8M_CALIB_Msk;
+
+        SYSCTRL_REGS->SYSCTRL_OSC8M =
+            SYSCTRL_OSC8M_ENABLE(1)        | // Keep oscillator running
+            SYSCTRL_OSC8M_PRESC(0)         | // Prescaler = 1 (full 8 MHz)
+            osc8m_calib                     | // Preserve the factory calibration bits
+            SYSCTRL_OSC8M_ONDEMAND(1);       // Only run when requested
+
+        while (!(SYSCTRL_REGS->SYSCTRL_PCLKSR & SYSCTRL_PCLKSR_OSC8MRDY_Msk))
+        {
+        }
+    }
+
+    /************************************************************************/
     /* GENERIC CLOCK GENERATOR 4  —  DFLL48M / 48  =  1 MHz                 */
     /************************************************************************/
 
@@ -219,46 +237,36 @@ void Clock_Control::Clock_Init(void)
     }
 
     /************************************************************************/
+    /* POWER MANAGER                                                        */
+    /************************************************************************/
+
+    PM_Clock_Bus_Setup();
+    // Ensure the Power Manager keeps the PORT peripheral clock running
+    PM_REGS->PM_APBBMASK |= PM_APBBMASK_PORT_Msk;
+    
+    SystemCoreClock = 48000000UL;
+
+    /************************************************************************/
     /* GCLK4 CLOCK OUTPUT PIN DEBUG  —  PA27 (GCLK_IO[1])                 */
     /*                                                                      */
     /* Outputs GCLK4 (1 MHz) to PA27 for oscilloscope debugging            */
     /************************************************************************/
     /**/ 
-    // Configure PA27 as GCLK_IO[1] - set peripheral multiplexer to H
-    PORT_REGS->GROUP[0].PORT_PMUX[13] =
-        (PORT_REGS->GROUP[0].PORT_PMUX[13] & 0x0FU) |  // Clear upper nibble (PA27 = pin 27, uses bits 7:4)
-        (0x7U << 4);                                    // Set to peripheral H (GCLK_IO[1]) in upper nibble (H=7)
 
-    // Enable peripheral multiplexing on PA27
-    PORT_REGS->GROUP[0].PORT_PINCFG[27] |= PORT_PINCFG_PMUXEN_Msk;
-    /**/
+    // Set PB10 to peripheral H (GCLK_IO[4])
+    // PB10 is an EVEN pin -> uses PMUXE (lower nibble, bits 3:0) of PMUX[5]
+    PORT_REGS->GROUP[1].PORT_PMUX[5] =
+        (PORT_REGS->GROUP[1].PORT_PMUX[5] & ~PORT_PMUX_PMUXE_Msk) | // Clear lower nibble safely
+        PORT_PMUX_PMUXE(7);                                         // 0x7 maps to Peripheral Function H
 
-    /************************************************************************/
-    /* INTERNAL 8MHz OSCILLATOR                                             */
-    /************************************************************************/
-    // Configure OSC8M and preserve the existing calibration value
-    {
-        uint32_t osc8m_calib = SYSCTRL_REGS->SYSCTRL_OSC8M & SYSCTRL_OSC8M_CALIB_Msk;
+    // Enable peripheral multiplexing on PB10
+    PORT_REGS->GROUP[1].PORT_PINCFG[10] |= PORT_PINCFG_PMUXEN_Msk;
 
-        SYSCTRL_REGS->SYSCTRL_OSC8M =
-            SYSCTRL_OSC8M_ENABLE(1)        | // Keep oscillator running
-            SYSCTRL_OSC8M_PRESC(0)         | // Prescaler = 1 (full 8 MHz)
-            osc8m_calib                     | // Preserve the factory calibration bits
-            SYSCTRL_OSC8M_ONDEMAND(1);       // Only run when requested
+    // Set PB10 pin direction to output
+    PORT_REGS->GROUP[1].PORT_DIRSET = (1U << 10);
+    
 
-        while (!(SYSCTRL_REGS->SYSCTRL_PCLKSR & SYSCTRL_PCLKSR_OSC8MRDY_Msk))
-        {
-        }
-    }
-
-    /************************************************************************/
-    /* POWER MANAGER                                                        */
-    /************************************************************************/
-
-    PM_Clock_Bus_Setup();
-    SystemCoreClock = 48000000UL;
-
-    /*
+        /*
     32768×1465=48,005,120 Hz
     So the DFLL target frequency is:
     fDFLL≈48.005 MHz
@@ -275,11 +283,6 @@ void Clock_Control::Clock_Init(void)
     //GCLK_IO[6] PB10
     //GCLK_IO[7] PB10
 
-    PORT_REGS->GROUP[1].PORT_DIRSET = (1U << 10);
-
-    PORT_REGS->GROUP[1].PORT_PINCFG[10] |= PORT_PINCFG_PMUXEN_Msk;
-    PORT_REGS->GROUP[1].PORT_PMUX[5] = (PORT_REGS->GROUP[1].PORT_PMUX[5] & 0x0FU) | (0x7U << 4); // Set PB10 to peripheral H (GCLK_IO[1])
-    
 
     //PORT_Initialize();
     //PORT_GroupOutputEnable(PORT_GROUP_B, PORT_PIN_PB10); // Set all pins of PORT_B as output for testing

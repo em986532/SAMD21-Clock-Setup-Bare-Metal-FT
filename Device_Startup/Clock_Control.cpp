@@ -1,123 +1,170 @@
 /*
  * Clock_Control.cpp
  *
- * Created: 12/5/2020 
- *  Author: ForceTronics
+ * Created: 12/5/2020
+ * Author: ForceTronics
  */
 
-#include "sam.h"
-#include "definitions.h" //definitions file 
-#include "Clock_Control.h" //this library
+#include "definitions.h"
+#include "Clock_Control.h"
 
-//class constructor. Used to create object to handle to class in main
+// class constructor
 Clock_Control::Clock_Control() { }
 
-//setup initial 48MHz system clock in closed loop control (generic clock 0)
-//Setup external 32768 clock as the clock source for generic clock 1, feed it as reference to 48MHz clock
-//Setup 8MHz clock 
-void Clock_Control::Clock_Init(void) {
-	
-	//NVM CTRLB registers and RWS[3:0] bit for setting wait states fro a read operation
-	//Defaults to 0 and can go as high as 15 (4 bits)
-    //EJM previous version 
-    //NVMCTRL->CTRLB.bit.RWS = 1;		// 1 wait state required @ 3.3V & 48MHz
-	NVMCTRL_REGS->NVMCTRL_CTRLB.bit.RWS = 1;		// 1 wait state required @ 3.3V & 48MHz
-    //ID_NVMCTRL
-	
-	//the system controller subsystem controls the clocks. The XOSC32K register sets up the External 32.768kHz oscillator
-	//EJM previous version ws SYSCTRL->XOSC32K.bit.WRTLOCK = 0;		//XOSC32K configuration is not locked
-    SYSCTRL_REGS->SYSCTRL_XOSC32K.bit.STARTUP = 0x2;		//3 cycle start-up time
-	ID_SYSCTRL->XOSC32K.bit.ONDEMAND = 0;		//Osc. is always running when enabled
-	ID_SYSCTRL->XOSC32K.bit.RUNSTDBY = 0;		//Osc. is disabled in standby sleep mode
-	ID_SYSCTRL->XOSC32K.bit.AAMPEN = 0;		//Disable automatic amplitude control
-	ID_SYSCTRL->XOSC32K.bit.EN32K = 1;			// 32kHz output is enable
-	ID_SYSCTRL->XOSC32K.bit.XTALEN = 1;		// Crystal connected to XIN32/XOUT32
-	// Enable the Oscillator - Separate step per data sheet recommendation (sec 17.6.3)
-	ID_SYSCTRL->XOSC32K.bit.ENABLE = 1; //should this be moved after the sync????
-	// Wait for XOSC32K to stabilize
-	while(!ID_SYSCTRL->PCLKSR.bit.XOSC32KRDY);
-	
-	//Generic clock subsystem setting GENDIV register to set the divide factor for Generic clock 1
-    //EJM was GCLK
-	ID_GCLK->GENDIV.reg |= GCLK_GENDIV_DIV(1) | GCLK_GENDIV_ID(GENERIC_CLOCK_GENERATOR_1); //set divide factor for gen clock 1
-	
-	// Configure Generic Clock Generator 1 with XOSC32K as source
-	ID_GCLK->GENCTRL.bit.RUNSTDBY = 0; // Generic Clock Generator is stopped in stdby
-	ID_GCLK->GENCTRL.bit.DIVSEL = 0;   // enable clock divide
-	ID_GCLK->GENCTRL.bit.OE = 0;		// Disable generator output to GCLK_IO[1]
-	ID_GCLK->GENCTRL.bit.OOV = 0;		// We will not use this signal as an output
-	ID_GCLK->GENCTRL.bit.IDC = 1;		// Generator duty cycle is 50/50
-	ID_GCLK->GENCTRL.bit.GENEN = 1;	// Enable the generator
-	ID_GCLK->GENCTRL.bit.SRC = CLOCK_XOSC32K;	// Generator source: XOSC32K output
-	ID_GCLK->GENCTRL.bit.ID = GENERIC_CLOCK_GENERATOR_1;	// This was created in Definitions.h, refers to generic clock 1
-	// GENCTRL is Write-Synchronized...so wait for write to complete
-	while(ID_GCLK->STATUS.bit.SYNCBUSY);
-	
-	//			Enable the Generic Clock     // Generic Clock Generator 1 is the source			 Generic Clock Multiplexer 0 (DFLL48M Reference)
-	ID_GCLK->CLKCTRL.reg |= GCLK_CLKCTRL_CLKEN | GCLK_CLKCTRL_GEN(GENERIC_CLOCK_GENERATOR_1) | GCLK_CLKCTRL_ID_DFLL48;
-	
-	// DFLL Configuration in Closed Loop mode, cf product data sheet chapter
-	// 17.6.7.1 - Closed-Loop Operation
-	// Enable the DFLL48M in open loop mode. Without this step, attempts to go into closed loop mode at 48 MHz will
-	// result in Processor Reset (you'll be at the in the Reset_Handler in startup_samd21.c).
-	// PCLKSR.DFLLRDY must be one before writing to the DFLL Control register
-	// Note that the DFLLRDY bit represents status of register synchronization - NOT clock stability
-	// (see Data Sheet 17.6.14 Synchronization for detail)
-	while(!ID_SYSCTRL->PCLKSR.bit.DFLLRDY);
-	ID_SYSCTRL->DFLLCTRL.reg = (uint16_t)(SYSCTRL_DFLLCTRL_ENABLE);
-	while(!ID_SYSCTRL->PCLKSR.bit.DFLLRDY);
-	
-	// Set up the Multiplier, Coarse and Fine steps. These values help the clock lock at the set frequency
-	//There is not much information in the datasheet on what they do exactly and how to tune them for your specific needs
-	//lower values lead to more "overshoot" but faster frequency lock. Higher values lead to less "overshoot" but slower lock time
-	//Datasheet says put them at half to get best of both worlds
-	ID_SYSCTRL->DFLLMUL.bit.CSTEP = 31; //max value is 2^6 - 1 or 63
-	ID_SYSCTRL->DFLLMUL.bit.FSTEP = 511; //max value is 2^10 - 1 or 1023
-	ID_SYSCTRL->DFLLMUL.bit.MUL = 1465; //multiplier of ref external clock to get to 48M --> 32768 x 1465 = 48,005,120
-	// Wait for synchronization
-	while(!ID_SYSCTRL->PCLKSR.bit.DFLLRDY);
-	// To reduce lock time, load factory calibrated values into DFLLVAL (cf. Data Sheet 17.6.7.1)
-	// Location of value is defined in Data Sheet Table 10-5. NVM Software Calibration Area Mapping
-	
-	// Switch DFLL48M to Closed Loop mode and enable WAITLOCK
-	ID_SYSCTRL->DFLLCTRL.reg |= (uint16_t) (SYSCTRL_DFLLCTRL_MODE | SYSCTRL_DFLLCTRL_WAITLOCK); 
+// setup initial 48MHz system clock in closed loop control
+void Clock_Control::Clock_Init(void)
+{
+    //=========================================================
+    // NVM WAIT STATES
+    //=========================================================
 
-	// Now that DFLL48M is running, switch CLKGEN0 source to it to run the core at 48 MHz.
-	// Enable output of Generic Clock Generator 0 (GCLK_MAIN) to the GCLK_IO[0] GPIO Pin
-	ID_GCLK->GENCTRL.bit.RUNSTDBY = 0;		// Generic Clock Generator is stopped in stdby
-	ID_GCLK->GENCTRL.bit.DIVSEL = 0;		// Use GENDIV.DIV value to divide the generator
-	ID_GCLK->GENCTRL.bit.OE = 0;			// Enable generator output to GCLK_IO[0]
-	ID_GCLK->GENCTRL.bit.OOV = 0;			// GCLK_IO[0] output value when generator is off
-	ID_GCLK->GENCTRL.bit.IDC = 1;			// Generator duty cycle is 50/50
-	ID_GCLK->GENCTRL.bit.GENEN = 1;		// Enable the generator
-	//The next two lines are where we set the system clock
-	ID_GCLK->GENCTRL.bit.SRC = CLOCK_DFLL48;		// Generator source: DFLL48M output
-	ID_GCLK->GENCTRL.bit.ID = GENERIC_CLOCK_GENERATOR_0;	// Generic clock gen 0 is used for system clock
-	// GENCTRL is Write-Synchronized...so wait for write to complete
-	while(ID_GCLK->STATUS.bit.SYNCBUSY);
-	
-	//setup the built-in 8MHz clock
-	ID_SYSCTRL->OSC8M.bit.PRESC = 0;		// Prescale by 1 (no divide)
-	ID_SYSCTRL->OSC8M.bit.ONDEMAND = 0;	// Oscillator is always on if enabled
+    // 1 wait state required @ 48MHz / 3.3V
+    NVMCTRL_REGS->NVMCTRL_CTRLB |= NVMCTRL_CTRLB_RWS(1);
 
-	PM_Clock_Bus_Setup(); //setup power management system
+    //=========================================================
+    // EXTERNAL 32.768kHz CRYSTAL
+    //=========================================================
+
+    SYSCTRL_REGS->SYSCTRL_XOSC32K =
+          SYSCTRL_XOSC32K_STARTUP(0x2)
+        | SYSCTRL_XOSC32K_EN32K_Msk
+        | SYSCTRL_XOSC32K_XTALEN_Msk;
+
+    // Enable oscillator
+    SYSCTRL_REGS->SYSCTRL_XOSC32K |= SYSCTRL_XOSC32K_ENABLE_Msk;
+
+    // Wait for oscillator ready
+    while (!(SYSCTRL_REGS->SYSCTRL_PCLKSR &
+             SYSCTRL_PCLKSR_XOSC32KRDY_Msk))
+    {
+    }
+
+    //=========================================================
+    // GENERIC CLOCK GENERATOR 1
+    //=========================================================
+
+    // Divide factor for GCLK1
+    GCLK_REGS->GCLK_GENDIV =
+          GCLK_GENDIV_DIV(1)
+        | GCLK_GENDIV_ID(1);
+
+    // Configure GCLK1 source = XOSC32K
+    GCLK_REGS->GCLK_GENCTRL =
+          GCLK_GENCTRL_ID(1)
+        | GCLK_GENCTRL_SRC_XOSC32K
+        | GCLK_GENCTRL_IDC_Msk
+        | GCLK_GENCTRL_GENEN_Msk;
+
+    // Wait for sync
+    while (GCLK_REGS->GCLK_STATUS & GCLK_STATUS_SYNCBUSY_Msk)
+    {
+    }
+
+    //=========================================================
+    // CONNECT GCLK1 TO DFLL48M REFERENCE
+    //=========================================================
+
+    GCLK_REGS->GCLK_CLKCTRL =
+          GCLK_CLKCTRL_CLKEN_Msk
+        | GCLK_CLKCTRL_GEN_GCLK1
+        | GCLK_CLKCTRL_ID_DFLL48;
+
+    while (GCLK_REGS->GCLK_STATUS & GCLK_STATUS_SYNCBUSY_Msk)
+    {
+    }
+
+    //=========================================================
+    // DFLL48M CONFIGURATION
+    //=========================================================
+
+    // Wait for DFLL ready
+    while (!(SYSCTRL_REGS->SYSCTRL_PCLKSR &
+             SYSCTRL_PCLKSR_DFLLRDY_Msk))
+    {
+    }
+
+    // Enable DFLL in open loop mode first
+    SYSCTRL_REGS->SYSCTRL_DFLLCTRL =
+        SYSCTRL_DFLLCTRL_ENABLE_Msk;
+
+    while (!(SYSCTRL_REGS->SYSCTRL_PCLKSR &
+             SYSCTRL_PCLKSR_DFLLRDY_Msk))
+    {
+    }
+
+    // Configure multiplier
+    SYSCTRL_REGS->SYSCTRL_DFLLMUL =
+          SYSCTRL_DFLLMUL_CSTEP(31)
+        | SYSCTRL_DFLLMUL_FSTEP(511)
+        | SYSCTRL_DFLLMUL_MUL(1465);
+
+    while (!(SYSCTRL_REGS->SYSCTRL_PCLKSR &
+             SYSCTRL_PCLKSR_DFLLRDY_Msk))
+    {
+    }
+
+    // Closed loop mode + wait lock
+    SYSCTRL_REGS->SYSCTRL_DFLLCTRL |=
+          SYSCTRL_DFLLCTRL_MODE_Msk
+        | SYSCTRL_DFLLCTRL_WAITLOCK_Msk;
+
+    while (!(SYSCTRL_REGS->SYSCTRL_PCLKSR &
+             SYSCTRL_PCLKSR_DFLLRDY_Msk))
+    {
+    }
+
+    //=========================================================
+    // GENERIC CLOCK GENERATOR 0 (MAIN SYSTEM CLOCK)
+    //=========================================================
+
+    GCLK_REGS->GCLK_GENCTRL =
+          GCLK_GENCTRL_ID(0)
+        | GCLK_GENCTRL_SRC_DFLL48M
+        | GCLK_GENCTRL_IDC_Msk
+        | GCLK_GENCTRL_GENEN_Msk;
+
+    while (GCLK_REGS->GCLK_STATUS &
+           GCLK_STATUS_SYNCBUSY_Msk)
+    {
+    }
+
+    //=========================================================
+    // INTERNAL 8MHz OSCILLATOR
+    //=========================================================
+
+    SYSCTRL_REGS->SYSCTRL_OSC8M &= ~SYSCTRL_OSC8M_PRESC_Msk;
+    SYSCTRL_REGS->SYSCTRL_OSC8M &= ~SYSCTRL_OSC8M_ONDEMAND_Msk;
+
+    // Setup power management clocks
+    PM_Clock_Bus_Setup();
 }
 
-//function for setting related to power management system
-//See section 16 of the datasheet
-void Clock_Control::PM_Clock_Bus_Setup(void) {
-	//in power management system do not divide system clock down
-	PM->CPUSEL.reg  = PM_CPUSEL_CPUDIV_DIV1; 
-	PM->APBASEL.reg = PM_APBASEL_APBADIV_DIV1_Val;
-	PM->APBBSEL.reg = PM_APBBSEL_APBBDIV_DIV1_Val;
-	PM->APBCSEL.reg = PM_APBCSEL_APBCDIV_DIV1_Val;
-} 
+//=========================================================
+// POWER MANAGEMENT SETUP
+//=========================================================
 
-//This function allows you change the system clock in real time
-//input is the clock identifier you want to use for system clock
-void Clock_Control::Change_Clock(uint32_t clk) {
-	ID_GCLK->GENCTRL.bit.SRC = clk;		// This is where you set system clock source
-	ID_GCLK->GENCTRL.bit.ID = GENERIC_CLOCK_GENERATOR_0;	// Generator ID: 0
-	// GENCTRL is Write-Synchronized.
-	while(ID_GCLK->STATUS.bit.SYNCBUSY);
+void Clock_Control::PM_Clock_Bus_Setup(void)
+{
+    PM_REGS->PM_CPUSEL = PM_CPUSEL_CPUDIV_DIV1;
+    PM_REGS->PM_APBASEL = PM_APBASEL_APBADIV_DIV1;
+    PM_REGS->PM_APBBSEL = PM_APBBSEL_APBBDIV_DIV1;
+    PM_REGS->PM_APBCSEL = PM_APBCSEL_APBCDIV_DIV1;
+}
+
+//=========================================================
+// CHANGE SYSTEM CLOCK SOURCE
+//=========================================================
+
+void Clock_Control::Change_Clock(uint32_t clk)
+{
+    GCLK_REGS->GCLK_GENCTRL =
+          GCLK_GENCTRL_ID(0)
+        | GCLK_GENCTRL_SRC(clk)
+        | GCLK_GENCTRL_IDC_Msk
+        | GCLK_GENCTRL_GENEN_Msk;
+
+    while (GCLK_REGS->GCLK_STATUS &
+           GCLK_STATUS_SYNCBUSY_Msk)
+    {
+    }
 }

@@ -114,7 +114,7 @@ const DeviceVectors exception_table = {
         .pvStack                = (void*) (&_estack),
 
         .pfnReset_Handler       = (void*) Reset_Handler,
-        .pfnNonMaskableInt_Handler = (void*) NonMaskableInt_Handler,
+        .pfnNonMaskableInt_Handler = (void*) NMI_Handler,
         .pfnHardFault_Handler   = (void*) HardFault_Handler,
         .pvReservedM12          = (void*) (0UL), /* Reserved */
         .pvReservedM11          = (void*) (0UL), /* Reserved */

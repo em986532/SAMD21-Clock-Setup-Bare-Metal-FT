@@ -9,6 +9,8 @@
 #ifndef CLOCK_CONTROL_H_
 #define CLOCK_CONTROL_H_
 
+#include <cstdint>
+
 class Clock_Control //class name
 {
 	public: //stuff you can use outside of library
